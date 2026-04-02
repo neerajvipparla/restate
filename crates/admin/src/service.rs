@@ -159,9 +159,6 @@ where
                 ),
         );
 
-        // Enable response compression (gzip, brotli) based on Accept-Encoding
-        let router = router.layer(CompressionLayer::new());
-
         // Merge Web UI router
         #[cfg(feature = "serve-web-ui")]
         let router = if !opts.disable_web_ui {
@@ -187,6 +184,7 @@ where
                 "/v3",
                 with_api_version_middleware(router, AdminApiVersion::V3),
             )
+            .layer(CompressionLayer::new())
             .layer(
                 ServiceBuilder::new()
                     .layer(HandleErrorLayer::new(|_| async {
