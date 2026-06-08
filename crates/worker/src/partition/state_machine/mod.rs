@@ -1528,14 +1528,10 @@ impl<S> StateMachineApplyContext<'_, S> {
         let status = self.get_invocation_status(&invocation_id).await?;
 
         match status {
-            InvocationStatus::Invoked(metadata) => {
-                self.kill_invoked_invocation(invocation_id, metadata)
-                    .await?;
-                self.reply_to_kill(response_sink, KillInvocationResponse::Ok);
-            }
-            InvocationStatus::Suspended { metadata, .. } | InvocationStatus::Paused(metadata) => {
-                self.kill_suspended_or_paused_invocation(invocation_id, metadata)
-                    .await?;
+            InvocationStatus::Invoked(metadata)
+            | InvocationStatus::Suspended { metadata, .. }
+            | InvocationStatus::Paused(metadata) => {
+                self.kill_active_invocation(invocation_id, metadata).await?;
                 self.reply_to_kill(response_sink, KillInvocationResponse::Ok);
             }
             InvocationStatus::Inboxed(inboxed) => {
@@ -1959,7 +1955,7 @@ impl<S> StateMachineApplyContext<'_, S> {
         Ok(())
     }
 
-    async fn kill_invoked_invocation(
+    async fn kill_active_invocation(
         &mut self,
         invocation_id: InvocationId,
         metadata: InFlightInvocationMetadata,
@@ -1969,60 +1965,6 @@ impl<S> StateMachineApplyContext<'_, S> {
             + WriteVirtualObjectStatusTable
             + ReadInvocationStatusTable
             + WriteInvocationStatusTable
-            + WriteVirtualObjectStatusTable
-            + ReadStateTable
-            + WriteStateTable
-            + WriteJournalTable
-            + ReadJournalTable
-            + WriteOutboxTable
-            + WriteFsmTable
-            + journal_table_v2::WriteJournalTable
-            + journal_table_v2::ReadJournalTable
-            + ReadVQueueTable
-            + WriteVQueueTable
-            + WriteJournalEventsTable,
-    {
-        let after_journal_entry_index = metadata
-            .journal_metadata
-            .length
-            .checked_sub(1)
-            .unwrap_or_default();
-
-        self.kill_child_invocations(&invocation_id, metadata.journal_metadata.length, &metadata)
-            .await?;
-
-        self.end_invocation(
-            invocation_id,
-            metadata,
-            Some(ResponseResult::Failure(KILLED_INVOCATION_ERROR)),
-        )
-        .await?;
-
-        // Write after end_invocation so journal cleanup (do_drop_journal) doesn't delete it
-        self.storage.put_journal_event(
-            invocation_id,
-            EventView {
-                append_time: self.record_created_at,
-                after_journal_entry_index,
-                event: RawEvent::from(Event::Killed(KilledEvent { last_failure: None })),
-            },
-            self.record_lsn.as_u64(),
-        )?;
-
-        self.do_send_abort_invocation_to_invoker(invocation_id);
-        Ok(())
-    }
-
-    async fn kill_suspended_or_paused_invocation(
-        &mut self,
-        invocation_id: InvocationId,
-        metadata: InFlightInvocationMetadata,
-    ) -> Result<(), Error>
-    where
-        S: WriteInboxTable
-            + WriteVirtualObjectStatusTable
-            + WriteInvocationStatusTable
-            + ReadInvocationStatusTable
             + WriteVirtualObjectStatusTable
             + ReadStateTable
             + WriteStateTable
